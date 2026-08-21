@@ -86,7 +86,14 @@ biscuit_pet_project/
 └─ pytest.ini
 ```
 
+## 自动化打包（GitHub Actions）
+
+仓库已配置 `.github/workflows/build-exe.yml`：每次推送到 `main`（或手动 **Actions → Run workflow**）会自动：
+1. 在 Ubuntu 上跑全部 **UIH 前缀测试**；
+2. 测试通过后在 **Windows runner** 上用 PyInstaller 打包；
+3. 把 `biscuit_pet.exe` 作为产物（Artifact）上传到该次运行，**点进 Actions 对应运行即可下载**，无需本地装环境。
+
 ## 说明
 
-- EXE 必须在 **Windows** 上用 `build_exe.bat` 生成（PyInstaller 不支持跨平台打包），打包后即为单文件、点开即用。
+- EXE 必须在 **Windows** 上生成（PyInstaller 不支持跨平台打包）；本地手动打包用 `build_exe.bat`，云端自动打包走 GitHub Actions。打包后均为单文件、点开即用。
 - 精灵图含「由 AI 生成」水印（已在角点尽量裁除）。

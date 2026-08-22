@@ -18,10 +18,13 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from .core import PetConfig, PetFSM, ReminderScheduler, POSES, STATE_TO_POSE
+from .core import (
+    PetConfig, PetFSM, ReminderScheduler,
+    POSES, STATE_TO_POSE, STATE_DURATION,
+)
 
 SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
-PET_W, PET_H = 380, 560
+PET_W, PET_H = 190, 280  # 降至原尺寸 1/2
 
 
 def _sprite_path(pose):
@@ -186,6 +189,10 @@ class PetWindow(QWidget):
         menu = QMenu()
         act_interact = menu.addAction("陪我玩（点击互动）")
         act_roll = menu.addAction("打滚撒娇")
+        act_head_tilt = menu.addAction("歪头好奇")
+        act_beg = menu.addAction("作揖讨食")
+        act_shake = menu.addAction("握手")
+        act_play_ball = menu.addAction("玩球球")
         act_remind = menu.addAction("立刻提醒我动一动")
         act_sleep = menu.addAction("去睡觉")
         menu.addSeparator()
@@ -193,6 +200,10 @@ class PetWindow(QWidget):
 
         act_interact.triggered.connect(self._do_interact)
         act_roll.triggered.connect(self._do_roll)
+        act_head_tilt.triggered.connect(self._do_head_tilt)
+        act_beg.triggered.connect(self._do_beg)
+        act_shake.triggered.connect(self._do_shake)
+        act_play_ball.triggered.connect(self._do_play_ball)
         act_remind.triggered.connect(self._do_remind_now)
         act_sleep.triggered.connect(self._do_sleep)
         act_quit.triggered.connect(self._do_quit)
@@ -214,9 +225,34 @@ class PetWindow(QWidget):
 
     def _do_roll(self):
         self.fsm.state = "roll"
-        self.fsm.roll_until = time.time() + 3.0
+        self.fsm.roll_until = time.time() + STATE_DURATION["roll"]
+        self.fsm.state_until = self.fsm.roll_until
         self.set_pose("roll")
         self.show_bubble(self.fsm.speech("roll"))
+
+    def _do_head_tilt(self):
+        self.fsm.state = "head_tilt"
+        self.fsm.state_until = time.time() + STATE_DURATION["head_tilt"]
+        self.set_pose("head_tilt")
+        self.show_bubble(self.fsm.speech("head_tilt"))
+
+    def _do_beg(self):
+        self.fsm.state = "beg"
+        self.fsm.state_until = time.time() + STATE_DURATION["beg"]
+        self.set_pose("beg")
+        self.show_bubble(self.fsm.speech("beg"))
+
+    def _do_shake(self):
+        self.fsm.state = "shake"
+        self.fsm.state_until = time.time() + STATE_DURATION["shake"]
+        self.set_pose("shake")
+        self.show_bubble(self.fsm.speech("shake"))
+
+    def _do_play_ball(self):
+        self.fsm.state = "play_ball"
+        self.fsm.state_until = time.time() + STATE_DURATION["play_ball"]
+        self.set_pose("play_ball")
+        self.show_bubble(self.fsm.speech("play_ball"))
 
     def _do_remind_now(self):
         msg = self.reminder._pick_message()

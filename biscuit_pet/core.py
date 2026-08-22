@@ -2,8 +2,11 @@
 
 PET_NAME = "饼干"
 
-# 全部姿势
-POSES = ["idle", "lie_down", "stare", "roll", "sleep", "happy"]
+# 全部姿势（11 种）
+POSES = [
+    "idle", "lie_down", "stare", "roll", "sleep", "happy",
+    "head_tilt", "beg", "shake", "play_ball", "yawn",
+]
 
 # 状态 -> 姿势文件名
 STATE_TO_POSE = {
@@ -13,6 +16,25 @@ STATE_TO_POSE = {
     "happy": "happy",
     "sleep": "sleep",
     "lie_down": "lie_down",
+    "head_tilt": "head_tilt",
+    "beg": "beg",
+    "shake": "shake",
+    "play_ball": "play_ball",
+    "yawn": "yawn",
+}
+
+# 点击后随机触发的反应状态
+CLICK_REACTIONS = ["happy", "roll", "stare", "head_tilt", "beg", "shake"]
+
+# 各临时状态的持续秒数
+STATE_DURATION = {
+    "roll": 3.0,
+    "happy": 2.5,
+    "head_tilt": 2.5,
+    "beg": 3.0,
+    "shake": 2.5,
+    "play_ball": 3.5,
+    "yawn": 2.0,
 }
 
 
@@ -43,6 +65,7 @@ class PetFSM:
         self.last_interaction = self.time_fn()
         self.roll_until = 0.0
         self.happy_until = 0.0
+        self.state_until = 0.0  # 新增临时状态（head_tilt/beg/shake/play_ball/yawn）的过期时间
 
     # ---- 互动 ----
     def on_click(self, now=None):
@@ -50,11 +73,13 @@ class PetFSM:
         if now is None:
             now = self.time_fn()
         self.last_interaction = now
-        self.state = self.rng.choice(["happy", "roll", "stare"])
+        self.state = self.rng.choice(CLICK_REACTIONS)
+        dur = STATE_DURATION.get(self.state, 3.0)
+        self.state_until = now + dur
         if self.state == "roll":
-            self.roll_until = now + 3.0
+            self.roll_until = self.state_until
         elif self.state == "happy":
-            self.happy_until = now + 2.5
+            self.happy_until = self.state_until
         return self.state, self.speech(self.state)
 
     def speech(self, state):
@@ -65,6 +90,11 @@ class PetFSM:
             "idle": f"{self.config.name}：哼哼～",
             "lie_down": f"{self.config.name}：趴着歇会儿～",
             "sleep": f"{self.config.name}：Zzz……",
+            "head_tilt": f"{self.config.name}：歪头～主人在说什么呀？",
+            "beg": f"{self.config.name}：作揖作揖！有零食吗～",
+            "shake": f"{self.config.name}：握手握手～嘿嘿！",
+            "play_ball": f"{self.config.name}：球球！主人陪我玩球球好不好？",
+            "yawn": f"{self.config.name}：哈欠～好困哦……",
         }.get(state, "")
 
     # ---- 每帧推进 ----
@@ -76,6 +106,9 @@ class PetFSM:
         if self.state == "roll" and now >= self.roll_until:
             self.state = "idle"
         if self.state == "happy" and now >= self.happy_until:
+            self.state = "idle"
+        # 新增临时状态到期回到 idle
+        if self.state in ("head_tilt", "beg", "shake", "play_ball", "yawn") and now >= self.state_until:
             self.state = "idle"
         # 睡觉中被打断（最近 2 秒有过互动）-> 醒来
         if self.state == "sleep" and (now - self.last_interaction) < 2.0:

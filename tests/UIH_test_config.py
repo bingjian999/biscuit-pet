@@ -19,13 +19,17 @@ def test_UIH_realistic_not_cartoon():
     assert PetConfig().realistic is True
 
 
-def test_UIH_all_six_poses_present():
-    """六种姿势齐备：idle/lie_down/stare/roll/sleep/happy。"""
-    assert set(POSES) == {"idle", "lie_down", "stare", "roll", "sleep", "happy"}
+def test_UIH_all_poses_present():
+    """十一种姿势齐备。"""
+    expected = {
+        "idle", "lie_down", "stare", "roll", "sleep", "happy",
+        "head_tilt", "beg", "shake", "play_ball", "yawn",
+    }
+    assert set(POSES) == expected
 
 
 def test_UIH_state_to_pose_complete():
-    for s in ("idle", "stare", "roll", "happy", "sleep", "lie_down"):
+    for s in POSES:
         assert STATE_TO_POSE[s] == s
 
 

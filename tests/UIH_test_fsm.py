@@ -1,7 +1,7 @@
 """UIH · 状态机（互动/打滚/睡觉/大眼睛注视）测试。"""
 import random
 
-from biscuit_pet.core import PetConfig, PetFSM
+from biscuit_pet.core import PetConfig, PetFSM, POSES, CLICK_REACTIONS, STATE_DURATION
 
 
 def _fsm(t0=0.0):
@@ -60,7 +60,7 @@ def test_UIH_sleep_interrupted_by_recent_interaction():
 
 def test_UIH_pose_matches_state():
     fsm, t = _fsm()
-    for s in ("idle", "stare", "roll", "happy", "sleep", "lie_down"):
+    for s in POSES:
         fsm.state = s
         assert fsm.pose() == s
 
@@ -69,3 +69,33 @@ def test_UIH_click_updates_last_interaction():
     fsm, t = _fsm()
     fsm.on_click(now=10.0)
     assert fsm.last_interaction == 10.0
+
+
+def test_UIH_click_reactions_include_new_poses():
+    """点击反应池包含新增姿势。"""
+    for pose in ("head_tilt", "beg", "shake"):
+        assert pose in CLICK_REACTIONS
+
+
+def test_UIH_new_temp_states_expire_to_idle():
+    """新增临时状态（head_tilt/beg/shake/play_ball/yawn）到期后回到 idle。"""
+    fsm, t = _fsm()
+    for pose in ("head_tilt", "beg", "shake", "play_ball", "yawn"):
+        fsm.state = pose
+        fsm.state_until = 5.0
+        state, _ = fsm.tick(now=6.0)
+        assert state == "idle", f"{pose} should expire to idle"
+
+
+def test_UIH_new_pose_speech_has_name():
+    """新增姿势台词都含饼干名字。"""
+    fsm, t = _fsm()
+    for pose in ("head_tilt", "beg", "shake", "play_ball", "yawn"):
+        text = fsm.speech(pose)
+        assert "饼干" in text, f"{pose} speech should contain name"
+
+
+def test_UIH_state_duration_defined_for_all_temp():
+    """所有临时状态都有持续时长。"""
+    for pose in ("roll", "happy", "head_tilt", "beg", "shake", "play_ball", "yawn"):
+        assert pose in STATE_DURATION

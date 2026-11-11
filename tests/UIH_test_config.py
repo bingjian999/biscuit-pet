@@ -1,7 +1,7 @@
 """UIH · 配置与基本设定测试。"""
 import os
 
-from biscuit_pet.core import PetConfig, PET_NAME, POSES, STATE_TO_POSE
+from biscuit_pet.core import PetConfig, BreakSettings, PET_NAME, POSES, STATE_TO_POSE
 
 
 def test_UIH_pet_name_is_biscuit():
@@ -33,10 +33,15 @@ def test_UIH_state_to_pose_complete():
         assert STATE_TO_POSE[s] == s
 
 
-def test_UIH_reminder_default_interval():
-    cfg = PetConfig()
-    assert cfg.reminder_interval_min == 45
-    assert cfg.activity_reminder_after_min == 3
+def test_UIH_break_settings_defaults():
+    """久坐提醒默认节奏：45 分钟久坐 + 3 分钟活动，全屏强制默认关。"""
+    s = BreakSettings()
+    assert s.sit_min == 45
+    assert s.activity_min == 3
+    assert s.preset == "45/3"
+    assert s.fullscreen_mode is False
+    assert s.sound_enabled is True
+    assert s.idle_away_min == 10
 
 
 def test_UIH_sprite_files_exist():

@@ -102,7 +102,8 @@ class PetConfig:
         self.name = PET_NAME
         self.no_tail = True
         self.realistic = True
-        self.reminder_interval_min = 30
+        self.reminder_interval_min = 45
+        self.activity_reminder_after_min = 3  # 久坐提醒后 3 分钟提示活动结束
         self.idle_to_sleep_sec = 120
         self.reminder_enabled = True
         self.mood_decay_sec = 60       # 心情每 60 秒衰减 1 点
@@ -332,13 +333,21 @@ class PetFSM:
 
 
 class ReminderScheduler:
-    """久坐提醒：到点提醒主人起来动一动。"""
+    """久坐提醒（两段式）：每 45 分钟提醒起身，3 分钟后再提示活动结束。
+
+    节奏：久坐 45 分钟 → 「该起来动一动」→ 3 分钟活动 → 「活动结束，继续加油」→ 循环。
+    """
 
     REMINDER_MESSAGES = [
-        "{name}提醒：主人坐太久啦，起来动一动吧！伸个懒腰～",
-        "{name}提醒：主人，该活动活动啦，陪我走走好不好？",
-        "{name}提醒：久坐伤身哦，主人快起来动一动！",
-        "{name}提醒：主人，站起来扭扭腰，饼干给你加油！",
+        "{name}提醒：主人已经坐了 45 分钟啦，起来活动 3 分钟吧！伸个懒腰～",
+        "{name}提醒：主人，坐了 45 分钟了，该活动活动啦，陪我走走好不好？",
+        "{name}提醒：久坐伤身哦，主人快起来动一动，3 分钟就好！",
+        "{name}提醒：主人，站起来扭扭腰动一动，饼干给你加油！",
+    ]
+
+    ACTIVITY_MESSAGES = [
+        "{name}提醒：3 分钟活动时间到！主人休息好啦，继续加油～",
+        "{name}提醒：动完啦？主人今天也辛苦了，饼干给你充电！",
     ]
 
     def __init__(self, config, time_fn=None, rng=None):
@@ -346,25 +355,34 @@ class ReminderScheduler:
         self.time_fn = time_fn or (lambda: 0.0)
         self.rng = rng or __import__("random").Random()
         self.next_due = self.time_fn() + config.reminder_interval_min * 60
+        self.activity_due = None  # 活动结束提醒时刻（触发久坐提醒后设置）
 
     def check(self, now=None):
         if not self.config.reminder_enabled:
             return False, None
         if now is None:
             now = self.time_fn()
+        # 活动结束提醒优先（处于活动窗口中时不看久坐计时）
+        if self.activity_due is not None:
+            if now >= self.activity_due:
+                self.activity_due = None
+                self.next_due = now + self.config.reminder_interval_min * 60
+                return True, self._pick_message(self.ACTIVITY_MESSAGES)
+            return False, None
         if now >= self.next_due:
-            self.next_due = now + self.config.reminder_interval_min * 60
-            return True, self._pick_message()
+            self.activity_due = now + self.config.activity_reminder_after_min * 60
+            return True, self._pick_message(self.REMINDER_MESSAGES)
         return False, None
 
-    def _pick_message(self):
-        tpl = self.rng.choice(self.REMINDER_MESSAGES)
+    def _pick_message(self, msgs=None):
+        tpl = self.rng.choice(msgs or self.REMINDER_MESSAGES)
         return tpl.format(name=self.config.name)
 
     def snooze(self, minutes, now=None):
         if now is None:
             now = self.time_fn()
         self.next_due = now + minutes * 60
+        self.activity_due = None  # 推迟时取消未触发的活动提醒
 
 
 class TimedReminder:

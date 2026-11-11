@@ -104,6 +104,7 @@ class CountdownRing(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFixedSize(64, 64)
+        self.setToolTip("久坐倒计时 · 点击打开设置")
         self.on_clicked = None
         self._phase = "sitting"
         self._seconds_left = 0
@@ -184,6 +185,14 @@ class BreakDialog(QWidget):
         self._auto_timer.timeout.connect(self._auto_snooze)
         self._count_timer = QTimer(self)
         self._count_timer.timeout.connect(self._tick_countdown)
+        # 右上角关闭钮：等同「稍后 5 分钟」
+        self._btn_close = QPushButton("×", self)
+        self._btn_close.setFixedSize(28, 28)
+        self._btn_close.setStyleSheet(
+            "QPushButton { background: rgba(0,0,0,30); color:#8a7a5a;"
+            " border:none; border-radius:14px; font-size:16px; padding:0; }")
+        self._btn_close.setToolTip("关闭（稍后 5 分钟再提醒）")
+        self._btn_close.clicked.connect(self._on_snooze)
 
     def _build_ui(self):
         self.setStyleSheet(self.STYLE_FULLSCREEN if self._fullscreen
@@ -235,6 +244,9 @@ class BreakDialog(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+        self._btn_close.move(self.width() - 34, 6)
+        self._btn_close.raise_()
+        self._btn_close.show()
         self._auto_timer.start(60000)
         self._count_timer.start(1000)
 
@@ -286,6 +298,7 @@ class BreakSettingsPanel(QWidget):
     def __init__(self, settings):
         super().__init__()
         self.settings = settings
+        self.on_settings_changed = None  # 节奏/阈值变更后的回调（重启调度）
         self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint
                             | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -299,9 +312,18 @@ class BreakSettingsPanel(QWidget):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
+        head_row = QHBoxLayout()
         head = QLabel("久坐提醒设置")
         head.setObjectName("head")
-        layout.addWidget(head)
+        head_row.addWidget(head)
+        head_row.addStretch(1)
+        btn_close = QPushButton("×")
+        btn_close.setFixedSize(24, 24)
+        btn_close.setStyleSheet("padding:0; font-size:14px;")
+        btn_close.setToolTip("关闭设置面板")
+        btn_close.clicked.connect(self.hide)
+        head_row.addWidget(btn_close)
+        layout.addLayout(head_row)
 
         # 预设节奏
         row = QHBoxLayout()
@@ -376,6 +398,7 @@ class BreakSettingsPanel(QWidget):
             self._act_spin.setValue(act)
             self._sit_spin.blockSignals(False)
             self._act_spin.blockSignals(False)
+            self._notify_changed()
 
     def _on_custom(self):
         # 防止预设联动触发时重复写盘（值一致时无副作用）
@@ -385,10 +408,17 @@ class BreakSettingsPanel(QWidget):
             key = self.settings.preset
             if key in self._preset_buttons:
                 self._preset_buttons[key].setChecked(True)
+            self._notify_changed()
 
     def _on_away(self):
         self.settings.idle_away_min = self._away_spin.value()
         self.settings.save()
+        self._notify_changed()
+
+    def _notify_changed(self):
+        """设置变更 → 通知外层重启调度，让新节奏立即生效。"""
+        if self.on_settings_changed:
+            self.on_settings_changed()
 
     def _on_sound(self, on):
         self.settings.sound_enabled = on
@@ -451,6 +481,7 @@ class PetWindow(QWidget):
         self.ring.on_clicked = self._toggle_break_panel
         self.ring.show()
         self.break_panel = BreakSettingsPanel(self.break_settings)
+        self.break_panel.on_settings_changed = self._on_break_settings_changed
         self.break_dlg = BreakDialog(fullscreen=False)
         self.break_dlg_full = BreakDialog(fullscreen=True)
         for dlg in (self.break_dlg, self.break_dlg_full):
@@ -585,7 +616,18 @@ class PetWindow(QWidget):
         dlg = self.break_dlg_full if self.break_settings.fullscreen_mode else self.break_dlg
         dlg.popup(title, msg)
         self.set_pose("happy")
-        self.show_bubble("主人，该起身活动了！")
+        self.show_bubble("主人，该起身活动了！", duration=8000)
+        # 双通道兜底：气泡可能一闪而过，托盘通知会留在系统通知中心
+        if hasattr(self, "tray"):
+            self.tray.showMessage(f"{self.config.name} · 久坐提醒", title + " " + msg,
+                                  QSystemTrayIcon.Information, 8000)
+
+    def _on_break_settings_changed(self):
+        """面板改了节奏/阈值 → 立即按新设置重新计时，并给明确反馈。"""
+        self.breaker.restart()
+        s = self.break_settings
+        self.show_bubble(
+            "好嘞，按 {} 分钟久坐 + {} 分钟活动重新计时～".format(s.sit_min, s.activity_min))
 
     def _on_rise(self):
         self.breaker.start_activity()

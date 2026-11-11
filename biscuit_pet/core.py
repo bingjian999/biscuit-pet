@@ -102,10 +102,7 @@ class PetConfig:
         self.name = PET_NAME
         self.no_tail = True
         self.realistic = True
-        self.reminder_interval_min = 45
-        self.activity_reminder_after_min = 3  # 久坐提醒后 3 分钟提示活动结束
         self.idle_to_sleep_sec = 120
-        self.reminder_enabled = True
         self.mood_decay_sec = 60       # 心情每 60 秒衰减 1 点
         self.mood_click_gain = 5       # 每次互动 +5 心情
         self.mood_max = 100
@@ -332,57 +329,176 @@ class PetFSM:
         return STATE_TO_POSE.get(self.state, "idle")
 
 
-class ReminderScheduler:
-    """久坐提醒（两段式）：每 45 分钟提醒起身，3 分钟后再提示活动结束。
+class BreakSettings:
+    """久坐提醒设置 + 起身统计（JSON 持久化，无 Qt 依赖）。
 
-    节奏：久坐 45 分钟 → 「该起来动一动」→ 3 分钟活动 → 「活动结束，继续加油」→ 循环。
+    - 预设节奏：45/3、60/5、30/2（久坐分钟/活动分钟），也可自定义
+    - sound_enabled：到点提示音；fullscreen_mode：全屏强制提醒（默认关）
+    - idle_away_min：离座判定阈值（闲置超此分钟视为已起身，自动重新计时）
+    - stats：今日/累计起身次数，跨天自动清零当日计数
+    - 设置与统计自动保存，下次打开记忆生效
     """
 
-    REMINDER_MESSAGES = [
-        "{name}提醒：主人已经坐了 45 分钟啦，起来活动 3 分钟吧！伸个懒腰～",
-        "{name}提醒：主人，坐了 45 分钟了，该活动活动啦，陪我走走好不好？",
-        "{name}提醒：久坐伤身哦，主人快起来动一动，3 分钟就好！",
-        "{name}提醒：主人，站起来扭扭腰动一动，饼干给你加油！",
-    ]
+    PRESETS = {"45/3": (45, 3), "60/5": (60, 5), "30/2": (30, 2)}
 
-    ACTIVITY_MESSAGES = [
-        "{name}提醒：3 分钟活动时间到！主人休息好啦，继续加油～",
-        "{name}提醒：动完啦？主人今天也辛苦了，饼干给你充电！",
-    ]
+    def __init__(self, store_path=None):
+        self.store_path = store_path  # None 时不持久化
+        self.sit_min = 45
+        self.activity_min = 3
+        self.sound_enabled = True
+        self.fullscreen_mode = False
+        self.idle_away_min = 10
+        self.preset = "45/3"
+        self.stats = {"date": "", "today": 0, "total": 0}
+        self.load()
 
-    def __init__(self, config, time_fn=None, rng=None):
-        self.config = config
-        self.time_fn = time_fn or (lambda: 0.0)
-        self.rng = rng or __import__("random").Random()
-        self.next_due = self.time_fn() + config.reminder_interval_min * 60
-        self.activity_due = None  # 活动结束提醒时刻（触发久坐提醒后设置）
+    def apply_preset(self, key):
+        if key in self.PRESETS:
+            self.sit_min, self.activity_min = self.PRESETS[key]
+            self.preset = key
+            self.save()
+            return True
+        return False
 
-    def check(self, now=None):
-        if not self.config.reminder_enabled:
-            return False, None
+    def set_custom(self, sit_min, activity_min):
+        """自定义节奏（限 1~180 / 1~60 分钟），非预设组合标记为 custom。"""
+        self.sit_min = min(180, max(1, int(sit_min)))
+        self.activity_min = min(60, max(1, int(activity_min)))
+        self.preset = f"{self.sit_min}/{self.activity_min}" \
+            if (self.sit_min, self.activity_min) in self.PRESETS.values() else "custom"
+        self.save()
+
+    def bump_standup(self, now=None):
+        """记一次起身（「我已起身」或离座自动识别）。"""
+        now = now or datetime.datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        if self.stats.get("date") != today:
+            self.stats = {"date": today, "today": 0,
+                          "total": self.stats.get("total", 0)}
+        self.stats["today"] += 1
+        self.stats["total"] += 1
+        self.save()
+
+    # ---- 持久化 ----
+    def _payload(self):
+        return {"settings": {
+                    "sit_min": self.sit_min, "activity_min": self.activity_min,
+                    "sound_enabled": self.sound_enabled,
+                    "fullscreen_mode": self.fullscreen_mode,
+                    "idle_away_min": self.idle_away_min, "preset": self.preset},
+                "stats": dict(self.stats)}
+
+    def save(self):
+        if not self.store_path:
+            return
+        try:
+            d = os.path.dirname(self.store_path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(self.store_path, "w", encoding="utf-8") as f:
+                json.dump(self._payload(), f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+
+    def load(self):
+        if not self.store_path or not os.path.exists(self.store_path):
+            return
+        try:
+            with open(self.store_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            s = data.get("settings", {})
+            self.sit_min = s.get("sit_min", 45)
+            self.activity_min = s.get("activity_min", 3)
+            self.sound_enabled = s.get("sound_enabled", True)
+            self.fullscreen_mode = s.get("fullscreen_mode", False)
+            self.idle_away_min = s.get("idle_away_min", 10)
+            self.preset = s.get("preset", "45/3")
+            st = data.get("stats", {})
+            if isinstance(st, dict):
+                self.stats = {"date": st.get("date", ""),
+                              "today": st.get("today", 0),
+                              "total": st.get("total", 0)}
+        except (OSError, ValueError):
+            pass  # 文件损坏时按默认值处理
+
+
+class BreakScheduler:
+    """久坐/活动两阶段调度（环形倒计时等 UI 的数据源，无 Qt 依赖）。
+
+    - sitting：久坐计时，到点产生一次 "sit_due" 事件（等弹窗处理：
+      我已起身 / 稍后 5 分钟，自动推迟由界面层负责）
+    - activity：休息倒计时，结束产生 "activity_done" 并自动进入下一轮久坐
+    - 离座识别：sitting 阶段闲置超过 idle_away_min 分钟 → 视为已起身，
+      产生 "away_reset" 事件、计入起身次数并重新计时
+    - tick 返回 {phase, seconds_left, progress, warning, events}：
+      progress 为已流逝比例（环形填充），warning=快到点（橙色警示）
+    """
+
+    WARN_SIT_SEC = 120  # 久坐快到点（橙色警示）阈值
+
+    def __init__(self, settings, time_fn=None):
+        self.settings = settings
+        self.time_fn = time_fn or (lambda: _time.time())
+        self.phase = "sitting"
+        self.sit_deadline = self.time_fn() + settings.sit_min * 60
+        self.activity_deadline = 0.0
+        self.due_reported = False
+
+    def _now(self):
+        return self.time_fn()
+
+    def snooze(self, minutes):
+        """稍后提醒：从当前时间起再等 minutes 分钟。"""
+        now = self._now()
+        self.sit_deadline = max(self.sit_deadline, now) + minutes * 60
+        self.due_reported = False
+
+    def start_activity(self):
+        """我已起身 → 进入活动倒计时，并计入起身次数。"""
+        now = self._now()
+        self.phase = "activity"
+        self.activity_deadline = now + self.settings.activity_min * 60
+        self.due_reported = False
+        self.settings.bump_standup(datetime.datetime.fromtimestamp(now))
+
+    def _reset_sit(self, now):
+        self.phase = "sitting"
+        self.sit_deadline = now + self.settings.sit_min * 60
+        self.due_reported = False
+
+    def _state(self, phase, seconds_left, events):
+        total = (self.settings.sit_min if phase == "sitting"
+                 else self.settings.activity_min) * 60
+        seconds_left = max(0, int(round(seconds_left)))
+        progress = min(1.0, max(0.0, 1.0 - seconds_left / total))
+        warning = phase == "sitting" and 0 < seconds_left <= self.WARN_SIT_SEC
+        return {"phase": phase, "seconds_left": seconds_left,
+                "progress": progress, "warning": warning, "events": events}
+
+    def tick(self, now=None, idle_sec=0.0):
+        events = []
         if now is None:
-            now = self.time_fn()
-        # 活动结束提醒优先（处于活动窗口中时不看久坐计时）
-        if self.activity_due is not None:
-            if now >= self.activity_due:
-                self.activity_due = None
-                self.next_due = now + self.config.reminder_interval_min * 60
-                return True, self._pick_message(self.ACTIVITY_MESSAGES)
-            return False, None
-        if now >= self.next_due:
-            self.activity_due = now + self.config.activity_reminder_after_min * 60
-            return True, self._pick_message(self.REMINDER_MESSAGES)
-        return False, None
-
-    def _pick_message(self, msgs=None):
-        tpl = self.rng.choice(msgs or self.REMINDER_MESSAGES)
-        return tpl.format(name=self.config.name)
-
-    def snooze(self, minutes, now=None):
-        if now is None:
-            now = self.time_fn()
-        self.next_due = now + minutes * 60
-        self.activity_due = None  # 推迟时取消未触发的活动提醒
+            now = self._now()
+        if self.phase == "sitting":
+            if idle_sec >= self.settings.idle_away_min * 60:
+                self.settings.bump_standup(datetime.datetime.fromtimestamp(now))
+                self._reset_sit(now)
+                events.append("away_reset")
+            else:
+                left = self.sit_deadline - now
+                if left <= 0:
+                    if not self.due_reported:
+                        self.due_reported = True
+                        events.append("sit_due")
+                    return self._state("sitting", 0, events)
+                return self._state("sitting", left, events)
+        # activity 阶段
+        left = self.activity_deadline - now
+        if left <= 0:
+            self._reset_sit(now)
+            events.append("activity_done")
+            return self._state("sitting", self.sit_deadline - now, events)
+        return self._state("activity", left, events)
 
 
 class TimedReminder:

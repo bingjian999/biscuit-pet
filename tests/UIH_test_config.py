@@ -34,7 +34,9 @@ def test_UIH_state_to_pose_complete():
 
 
 def test_UIH_reminder_default_interval():
-    assert PetConfig().reminder_interval_min == 30
+    cfg = PetConfig()
+    assert cfg.reminder_interval_min == 45
+    assert cfg.activity_reminder_after_min == 3
 
 
 def test_UIH_sprite_files_exist():

@@ -12,6 +12,9 @@ v2 新增互动：
 """
 
 import datetime
+import json
+import os
+import time as _time
 
 PET_NAME = "饼干"
 
@@ -362,3 +365,123 @@ class ReminderScheduler:
         if now is None:
             now = self.time_fn()
         self.next_due = now + minutes * 60
+
+
+class TimedReminder:
+    """定时提醒：用户自定义 HH:MM + 提醒内容，每天到点触发一次。
+
+    - 同一时间的旧提醒会被新提醒覆盖
+    - 每条提醒每天最多触发一次（按日期去重）
+    - 触发后有 CATCHUP_MIN 分钟追补窗口（应用刚启动时不会漏掉刚过的点）
+    - 提醒列表持久化到 JSON 文件，重启后保留
+    """
+
+    CATCHUP_MIN = 15  # 追补窗口（分钟）
+
+    def __init__(self, config, time_fn=None, store_path=None):
+        self.config = config
+        self.time_fn = time_fn or (lambda: _time.time())
+        self.store_path = store_path  # None 时不持久化
+        self.reminders = []  # [{"time": "HH:MM", "text": str, "last_fired": "YYYY-MM-DD"}]
+        self.load()
+
+    # ---- 增删查 ----
+    @staticmethod
+    def _norm_hhmm(hhmm):
+        """归一化时间字符串，合法返回 'HH:MM'，否则返回 None。"""
+        if not isinstance(hhmm, str):
+            return None
+        s = hhmm.strip().replace("：", ":")
+        for sep in (":",):
+            parts = s.split(sep)
+            if len(parts) != 2:
+                continue
+            try:
+                h, m = int(parts[0]), int(parts[1])
+            except ValueError:
+                continue
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return f"{h:02d}:{m:02d}"
+        return None
+
+    def add(self, hhmm, text):
+        """添加（或覆盖同一时间的）提醒。成功返回 True。"""
+        t = self._norm_hhmm(hhmm)
+        text = (text or "").strip()
+        if t is None or not text:
+            return False
+        self.remove(t)
+        self.reminders.append({"time": t, "text": text, "last_fired": ""})
+        self.reminders.sort(key=lambda r: r["time"])
+        self.save()
+        return True
+
+    def remove(self, hhmm):
+        """删除指定时间的提醒，返回是否删除了至少一条。"""
+        t = self._norm_hhmm(hhmm) or hhmm
+        before = len(self.reminders)
+        self.reminders = [r for r in self.reminders if r["time"] != t]
+        changed = len(self.reminders) < before
+        if changed:
+            self.save()
+        return changed
+
+    def clear(self):
+        self.reminders = []
+        self.save()
+
+    def items(self):
+        return [dict(r) for r in self.reminders]
+
+    # ---- 触发检查 ----
+    def check(self, now=None):
+        """返回本轮触发的提醒文本列表（已标记当天已触发）。"""
+        if now is None:
+            now = self._now()
+        elif isinstance(now, (int, float)):
+            now = datetime.datetime.fromtimestamp(now)
+        today = now.strftime("%Y-%m-%d")
+        fired = []
+        for r in self.reminders:
+            if r.get("last_fired") == today:
+                continue
+            try:
+                rt = datetime.datetime.strptime(r["time"], "%H:%M").time()
+            except ValueError:
+                continue
+            due_dt = now.replace(hour=rt.hour, minute=rt.minute, second=0, microsecond=0)
+            delta_min = (now - due_dt).total_seconds() / 60.0
+            if 0 <= delta_min <= self.CATCHUP_MIN:
+                r["last_fired"] = today
+                fired.append(f"⏰ {self.config.name}的定时提醒：{r['text']}")
+        if fired:
+            self.save()
+        return fired
+
+    # ---- 持久化 ----
+    def save(self):
+        if not self.store_path:
+            return
+        try:
+            d = os.path.dirname(self.store_path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(self.store_path, "w", encoding="utf-8") as f:
+                json.dump(self.reminders, f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass  # 持久化失败不影响运行
+
+    def load(self):
+        if not self.store_path or not os.path.exists(self.store_path):
+            return
+        try:
+            with open(self.store_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                self.reminders = [
+                    {"time": r.get("time", ""), "text": r.get("text", ""),
+                     "last_fired": r.get("last_fired", "")}
+                    for r in data if isinstance(r, dict)
+                ]
+        except (OSError, ValueError):
+            pass  # 文件损坏时忽略，按空列表处理

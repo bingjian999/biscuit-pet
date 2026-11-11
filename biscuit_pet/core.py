@@ -443,6 +443,7 @@ class BreakScheduler:
         self.sit_deadline = self.time_fn() + settings.sit_min * 60
         self.activity_deadline = 0.0
         self.due_reported = False
+        self.away_reported = False  # 一段离座期间只记一次起身/报一次事件
 
     def _now(self):
         return self.time_fn()
@@ -466,6 +467,11 @@ class BreakScheduler:
         self.sit_deadline = now + self.settings.sit_min * 60
         self.due_reported = False
 
+    def restart(self):
+        """设置变更后立即生效：按当前节奏重新计时。"""
+        self._reset_sit(self._now())
+        self.away_reported = False
+
     def _state(self, phase, seconds_left, events):
         total = (self.settings.sit_min if phase == "sitting"
                  else self.settings.activity_min) * 60
@@ -481,17 +487,21 @@ class BreakScheduler:
             now = self._now()
         if self.phase == "sitting":
             if idle_sec >= self.settings.idle_away_min * 60:
-                self.settings.bump_standup(datetime.datetime.fromtimestamp(now))
+                # 离座期间持续顺延计时（回来后重新计），但起身只记一次
+                if not self.away_reported:
+                    self.away_reported = True
+                    self.settings.bump_standup(datetime.datetime.fromtimestamp(now))
+                    events.append("away_reset")
                 self._reset_sit(now)
-                events.append("away_reset")
-            else:
-                left = self.sit_deadline - now
-                if left <= 0:
-                    if not self.due_reported:
-                        self.due_reported = True
-                        events.append("sit_due")
-                    return self._state("sitting", 0, events)
-                return self._state("sitting", left, events)
+                return self._state("sitting", self.sit_deadline - now, events)
+            self.away_reported = False
+            left = self.sit_deadline - now
+            if left <= 0:
+                if not self.due_reported:
+                    self.due_reported = True
+                    events.append("sit_due")
+                return self._state("sitting", 0, events)
+            return self._state("sitting", left, events)
         # activity 阶段
         left = self.activity_deadline - now
         if left <= 0:

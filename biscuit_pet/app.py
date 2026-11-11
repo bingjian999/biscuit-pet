@@ -16,16 +16,24 @@ from PySide6.QtWidgets import (
     QWidget,
     QSystemTrayIcon,
     QMenu,
+    QInputDialog,
+    QDialog,
+    QListWidget,
+    QPushButton,
+    QVBoxLayout,
+    QHBoxLayout,
 )
 
 from .core import (
-    PetConfig, PetFSM, ReminderScheduler,
+    PetConfig, PetFSM, ReminderScheduler, TimedReminder,
     POSES, STATE_TO_POSE, STATE_DURATION,
     greeting_message,
 )
 
 SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
-PET_W, PET_H = 190, 280
+# 显示尺寸（v3 缩小约 1/3）：精灵原图为高分辨率（2000px+），窗口缩小仅影响
+# 屏幕上的占位大小，SmoothTransformation 缩放下画质不受影响
+PET_W, PET_H = 130, 192
 
 
 def _sprite_path(pose):
@@ -100,6 +108,11 @@ class PetWindow(QWidget):
             hour_fn=lambda: datetime.datetime.now().hour,
         )
         self.reminder = ReminderScheduler(self.config, time_fn=time.time)
+        self.timed = TimedReminder(
+            self.config,
+            time_fn=time.time,
+            store_path=os.path.join(os.path.expanduser("~"), ".biscuit_pet_reminders.json"),
+        )
         self.bubble = SpeechBubble()
 
         self._drag_offset = None
@@ -166,6 +179,9 @@ class PetWindow(QWidget):
         if due:
             self.set_pose("happy")
             self.show_bubble(msg)
+        # 用户自定义定时提醒（每分钟检查一次）
+        for text in self.timed.check():
+            self._notify_reminder(text)
 
     def on_romp(self):
         """自发行为：根据时间和心情选择状态。"""
@@ -314,6 +330,9 @@ class PetWindow(QWidget):
 
         # 功能组
         m.addAction("久坐提醒").triggered.connect(self._do_remind_now)
+        timed_menu = m.addMenu("定时提醒")
+        timed_menu.addAction("添加提醒…").triggered.connect(self._add_timed_reminder)
+        timed_menu.addAction("管理提醒…").triggered.connect(self._manage_timed_reminders)
         m.addAction("去睡觉").triggered.connect(self._do_sleep)
         m.addSeparator()
 
@@ -422,6 +441,81 @@ class PetWindow(QWidget):
         msg = self.reminder._pick_message()
         self.set_pose("happy")
         self.show_bubble(msg)
+
+    # ---- 定时提醒 ----
+    def _notify_reminder(self, text):
+        """定时提醒触发：作揖引起注意 + 气泡 + 系统托盘通知。"""
+        self.set_pose("beg")
+        self.show_bubble(text, duration=8000)
+        if hasattr(self, "tray"):
+            self.tray.showMessage(
+                f"{self.config.name} · 定时提醒", text,
+                QSystemTrayIcon.Information, 8000,
+            )
+
+    def _add_timed_reminder(self):
+        """添加定时提醒：先输入 HH:MM，再输入内容。"""
+        t, ok = QInputDialog.getText(
+            self, "添加定时提醒",
+            "提醒时间（24小时制，如 14:30）：",
+        )
+        if not ok:
+            return
+        if TimedReminder._norm_hhmm(t) is None:
+            self.show_bubble("时间格式不对哦，要用 14:30 这样的格式～")
+            return
+        text, ok = QInputDialog.getText(self, "添加定时提醒", "提醒内容：")
+        if not ok:
+            return
+        if not self.timed.add(t, text):
+            self.show_bubble("提醒内容不能是空的～")
+            return
+        self.set_pose("happy")
+        self.show_bubble(f"好嘞！每天 {TimedReminder._norm_hhmm(t)} 我会提醒你的～")
+
+    def _manage_timed_reminders(self):
+        """管理定时提醒：查看列表、删除选中、清空全部。"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{self.config.name}的定时提醒")
+        dlg.setMinimumWidth(360)
+        layout = QVBoxLayout(dlg)
+
+        lst = QListWidget(dlg)
+        items = self.timed.items()
+        if not items:
+            lst.addItem("（还没有定时提醒，去添加一个吧）")
+        for r in items:
+            lst.addItem(f"{r['time']}    {r['text']}")
+        layout.addWidget(lst)
+
+        btn_row = QHBoxLayout()
+        btn_del = QPushButton("删除选中", dlg)
+        btn_clear = QPushButton("清空全部", dlg)
+        btn_close = QPushButton("关闭", dlg)
+        btn_row.addWidget(btn_del)
+        btn_row.addWidget(btn_clear)
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        def _del_selected():
+            row = lst.currentRow()
+            if row < 0 or row >= len(items):
+                return
+            self.timed.remove(items[row]["time"])
+            lst.takeItem(row)
+            items.pop(row)
+
+        def _clear_all():
+            self.timed.clear()
+            lst.clear()
+            items.clear()
+            lst.addItem("（还没有定时提醒，去添加一个吧）")
+
+        btn_del.clicked.connect(_del_selected)
+        btn_clear.clicked.connect(_clear_all)
+        btn_close.clicked.connect(dlg.accept)
+        dlg.exec()
 
     def _do_sleep(self):
         self.fsm.state = "sleep"

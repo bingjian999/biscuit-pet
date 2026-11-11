@@ -179,3 +179,43 @@ def test_UIH_break_no_store_no_crash(tmp_path):
     s.bump_standup()
     assert s.sit_min == 60
     assert s.stats["total"] == 1
+
+
+def test_UIH_break_restart_applies_new_settings(tmp_path):
+    """易用性关键：面板改节奏后必须立即生效，而不是仍按旧 45 分钟走。"""
+    s = make_settings(tmp_path)
+    clock = [T0]
+    b = BreakScheduler(s, time_fn=lambda: clock[0])
+    clock[0] = T0 + 100  # 已坐了 100 秒
+    s.set_custom(1, 1)   # 用户在面板改成 1 分钟
+    b.restart()          # 面板回调触发
+    st = b.tick()
+    assert st["phase"] == "sitting"
+    assert st["seconds_left"] == 60  # 按新节奏重新计时
+    clock[0] = T0 + 100 + 61
+    assert "sit_due" in b.tick()["events"]  # 1 分钟后到点弹窗
+
+
+def test_UIH_break_away_counted_once_per_episode(tmp_path):
+    """一段离座只记一次起身，离座期间久坐计时持续顺延。"""
+    s = make_settings(tmp_path)  # idle_away_min=10
+    clock = [T0]
+    b = BreakScheduler(s, time_fn=lambda: clock[0])
+    clock[0] = T0 + 601
+    st = b.tick(idle_sec=601)
+    assert "away_reset" in st["events"]
+    assert s.stats["today"] == 1
+    # 持续离座 5 分钟：不再重复计数/报事件，但截止时间不断顺延
+    for i in range(5):
+        clock[0] = T0 + 601 + (i + 1) * 60
+        st = b.tick(idle_sec=601 + (i + 1) * 60)
+        assert st["events"] == []
+        assert st["seconds_left"] == 45 * 60
+    assert s.stats["today"] == 1
+    # 回来活动一会儿（闲置 < 阈值），再次离座会重新计一次
+    clock[0] += 60
+    b.tick(idle_sec=30)
+    clock[0] += 60
+    st = b.tick(idle_sec=601)
+    assert "away_reset" in st["events"]
+    assert s.stats["today"] == 2

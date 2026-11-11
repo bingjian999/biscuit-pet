@@ -1,112 +1,181 @@
-"""UIH · 久坐提醒调度测试。"""
-import random
+"""UIH · 久坐提醒（BreakSettings + BreakScheduler）测试。
 
-from biscuit_pet.core import PetConfig, ReminderScheduler
+覆盖需求要点：
+- 45 分钟久坐 + 3 分钟活动两阶段节奏
+- 快到点（≤120 秒）橙色警示标记
+- 到点 sit_due 只触发一次；稍后 5 分钟推迟
+- 我已起身 → 进入活动倒计时并计入起身统计
+- 离座识别：闲置超 10 分钟视为已起身，自动重新计时
+- 预设节奏（45/3、60/5、30/2）与自定义时长（含边界钳制）
+- 设置 + 统计 JSON 持久化，跨天清零当日计数
+"""
+import datetime
+import json
+import os
+import tempfile
 
+import pytest
 
-def _sched(t0=0.0, interval=30):
-    t = {"v": t0}
-    cfg = PetConfig()
-    cfg.reminder_interval_min = interval
-    return ReminderScheduler(cfg, time_fn=lambda: t["v"], rng=random.Random(1)), t
-
-
-def test_UIH_reminder_not_due_before_interval():
-    sch, t = _sched(interval=30)
-    t["v"] = 60 * 29
-    due, msg = sch.check()
-    assert due is False and msg is None
-
-
-def test_UIH_reminder_due_after_interval():
-    sch, t = _sched(interval=30)
-    t["v"] = 60 * 30 + 1
-    due, msg = sch.check()
-    assert due is True
-    assert "饼干" in msg
-    assert "动一动" in msg or "活动" in msg or "动" in msg
+from biscuit_pet.core import BreakScheduler, BreakSettings
 
 
-def test_UIH_reminder_reschedules_after_fire():
-    sch, t = _sched(interval=30)
-    t["v"] = 60 * 30
-    due, _ = sch.check()
-    assert due is True
-    # 刚提醒过，短时间内不再提醒
-    t["v"] = 60 * 30 + 5
-    due2, _ = sch.check()
-    assert due2 is False
-    # 又过了一个周期才再次提醒
-    t["v"] = 60 * 60 + 1
-    due3, _ = sch.check()
-    assert due3 is True
+T0 = 1_000_000_000.0  # 固定起始时间戳
 
 
-def test_UIH_reminder_can_be_disabled():
-    sch, t = _sched()
-    sch.config.reminder_enabled = False
-    t["v"] = 60 * 60 * 10
-    due, msg = sch.check()
-    assert due is False and msg is None
+def make_settings(tmp_path=None, **kw):
+    store = os.path.join(str(tmp_path), "break.json") if tmp_path else None
+    s = BreakSettings(store_path=store)
+    for k, v in kw.items():
+        setattr(s, k, v)
+    return s
 
 
-def test_UIH_reminder_snooze():
-    sch, t = _sched(interval=30)
-    t["v"] = 60 * 30
-    sch.check()  # 触发一次
-    sch.snooze(5, now=60 * 30)  # 推迟 5 分钟
-    t["v"] = 60 * 35 - 1
-    due, _ = sch.check()
-    assert due is False
-    t["v"] = 60 * 35 + 1
-    due, _ = sch.check()
-    assert due is True
+def test_UIH_break_defaults_45_3():
+    s = make_settings()
+    assert (s.sit_min, s.activity_min) == (45, 3)
+    assert s.preset == "45/3"
+    assert s.sound_enabled is True
+    assert s.fullscreen_mode is False
+    assert s.idle_away_min == 10
 
 
-# ---- 两段式节奏：45 分钟久坐 + 3 分钟活动 ----
-
-def test_UIH_reminder_sedentary_then_activity():
-    """久坐提醒后 3 分钟触发活动结束提醒。"""
-    sch, t = _sched(interval=45)
-    t["v"] = 60 * 45
-    due, msg = sch.check()
-    assert due is True
-    assert "活动" in msg or "动" in msg          # 久坐提醒
-    # 活动窗口内（3 分钟内）不再打扰
-    t["v"] = 60 * 45 + 60 * 3 - 1
-    due, msg = sch.check()
-    assert due is False and msg is None
-    # 3 分钟到 → 活动结束提醒
-    t["v"] = 60 * 45 + 60 * 3
-    due, msg = sch.check()
-    assert due is True and ("活动时间到" in msg or "动完" in msg)
-    # 活动提醒只触发一次
-    t["v"] = 60 * 45 + 60 * 3 + 10
-    due, _ = sch.check()
-    assert due is False
+def test_UIH_break_presets():
+    s = make_settings()
+    for key, (sit, act) in BreakSettings.PRESETS.items():
+        assert s.apply_preset(key) is True
+        assert (s.sit_min, s.activity_min) == (sit, act)
+        assert s.preset == key
+    assert s.apply_preset("99/9") is False
 
 
-def test_UIH_reminder_cycle_repeats_after_activity():
-    """活动结束后进入下一个 45 分钟周期。"""
-    sch, t = _sched(interval=45)
-    t["v"] = 60 * 45
-    sch.check()                                   # 久坐提醒
-    t["v"] = 60 * 48
-    sch.check()                                   # 活动结束提醒
-    t["v"] = 60 * 48 + 60 * 45 - 1
-    due, _ = sch.check()
-    assert due is False
-    t["v"] = 60 * 48 + 60 * 45 + 1
-    due, _ = sch.check()
-    assert due is True
+def test_UIH_break_custom_clamped():
+    s = make_settings()
+    s.set_custom(90, 5)
+    assert (s.sit_min, s.activity_min, s.preset) == (90, 5, "custom")
+    # 边界钳制：久坐 1~180，活动 1~60
+    s.set_custom(0, 999)
+    assert (s.sit_min, s.activity_min) == (1, 60)
+    s.set_custom(500, 0)
+    assert (s.sit_min, s.activity_min) == (180, 1)
+    # 恰好等于预设组合时标记回预设
+    s.set_custom(60, 5)
+    assert s.preset == "60/5"
 
 
-def test_UIH_reminder_snooze_cancels_pending_activity():
-    """推迟久坐提醒时，未触发的活动提醒一并取消。"""
-    sch, t = _sched(interval=45)
-    t["v"] = 60 * 45
-    sch.check()                                   # 久坐提醒（活动提醒待触发）
-    sch.snooze(10, now=60 * 45)
-    t["v"] = 60 * 48 + 5                          # 原活动提醒时刻已过
-    due, _ = sch.check()
-    assert due is False                           # 不应触发活动提醒
+def test_UIH_break_sitting_countdown_and_warning(tmp_path):
+    s = make_settings(tmp_path, sit_min=5, activity_min=1)
+    clock = [T0]
+    b = BreakScheduler(s, time_fn=lambda: clock[0])
+    st = b.tick(now=T0 + 10)
+    assert st["phase"] == "sitting"
+    assert st["seconds_left"] == 290
+    assert 0 < st["progress"] < 1
+    assert st["warning"] is False
+    assert st["events"] == []
+    # 剩 100 秒内 → 橙色警示
+    st = b.tick(now=T0 + 5 * 60 - 100)
+    assert st["seconds_left"] == 100
+    assert st["warning"] is True
+    assert st["events"] == []
+
+
+def test_UIH_break_sit_due_once(tmp_path):
+    s = make_settings(tmp_path, sit_min=1, activity_min=1)
+    b = BreakScheduler(s, time_fn=lambda: T0)
+    st = b.tick(now=T0 + 61)
+    assert "sit_due" in st["events"]
+    assert st["seconds_left"] == 0
+    # 到点后持续 tick 不重复触发
+    for _ in range(3):
+        assert b.tick(now=T0 + 62)["events"] == []
+
+
+def test_UIH_break_snooze(tmp_path):
+    s = make_settings(tmp_path, sit_min=1, activity_min=1)
+    b = BreakScheduler(s, time_fn=lambda: T0)
+    b.tick(now=T0 + 61)  # sit_due
+    b.snooze(5)
+    st = b.tick(now=T0 + 61)
+    assert st["events"] == []
+    assert st["seconds_left"] == 5 * 60 - 1
+    # 5 分钟后再次到点，可再触发一次
+    st = b.tick(now=T0 + 61 + 5 * 60)
+    assert "sit_due" in st["events"]
+
+
+def test_UIH_break_rise_then_activity_done(tmp_path):
+    s = make_settings(tmp_path, sit_min=5, activity_min=3)
+    clock = [T0]
+    b = BreakScheduler(s, time_fn=lambda: clock[0])
+    clock[0] = T0 + 301
+    assert "sit_due" in b.tick()["events"]
+    clock[0] = T0 + 320
+    b.start_activity()  # 我已起身 → 活动倒计时 3 分钟 + 计起身
+    st = b.tick()
+    assert st["phase"] == "activity"
+    assert st["seconds_left"] == 180
+    assert st["warning"] is False
+    assert s.stats["today"] == 1  # 起身计入统计
+    # 活动结束 → 自动进入下一轮久坐（本轮设置 sit_min=5 分钟）
+    clock[0] = T0 + 320 + 181
+    st = b.tick()
+    assert "activity_done" in st["events"]
+    assert st["phase"] == "sitting"
+    assert st["seconds_left"] == 5 * 60
+
+
+def test_UIH_break_away_reset(tmp_path):
+    """闲置超 10 分钟视为已起身：away_reset + 重新计时 + 计数。"""
+    s = make_settings(tmp_path)  # 默认 idle_away_min=10
+    b = BreakScheduler(s, time_fn=lambda: T0)
+    b.tick(now=T0 + 100, idle_sec=60)  # 闲置不足，正常倒计时
+    st = b.tick(now=T0 + 200, idle_sec=10 * 60 + 1)
+    assert "away_reset" in st["events"]
+    assert st["phase"] == "sitting"
+    assert st["seconds_left"] == 45 * 60
+    assert s.stats["today"] == 1
+
+
+def test_UIH_break_stats_rollover(tmp_path):
+    s = make_settings(tmp_path)
+    s.bump_standup(datetime.datetime(2026, 11, 10, 9, 0, 0))
+    s.bump_standup(datetime.datetime(2026, 11, 10, 15, 0, 0))
+    assert s.stats == {"date": "2026-11-10", "today": 2, "total": 2}
+    # 跨天：today 清零，total 累计
+    s.bump_standup(datetime.datetime(2026, 11, 11, 8, 0, 0))
+    assert s.stats["date"] == "2026-11-11"
+    assert s.stats["today"] == 1
+    assert s.stats["total"] == 3
+
+
+def test_UIH_break_persistence_roundtrip(tmp_path):
+    store = os.path.join(str(tmp_path), "break.json")
+    s1 = BreakSettings(store_path=store)
+    s1.apply_preset("30/2")
+    s1.sound_enabled = False
+    s1.fullscreen_mode = True
+    s1.idle_away_min = 15
+    s1.bump_standup(datetime.datetime(2026, 11, 11, 10, 0, 0))
+    assert os.path.exists(store)
+    s2 = BreakSettings(store_path=store)
+    assert s2.sit_min == 30 and s2.activity_min == 2 and s2.preset == "30/2"
+    assert s2.sound_enabled is False
+    assert s2.fullscreen_mode is True
+    assert s2.idle_away_min == 15
+    assert s2.stats["today"] == 1 and s2.stats["total"] == 1
+
+
+def test_UIH_break_persistence_survives_corrupt_file(tmp_path):
+    store = os.path.join(str(tmp_path), "break.json")
+    with open(store, "w", encoding="utf-8") as f:
+        f.write("{broken json!!")
+    s = BreakSettings(store_path=store)
+    assert s.sit_min == 45 and s.activity_min == 3  # 损坏时回退默认值
+
+
+def test_UIH_break_no_store_no_crash(tmp_path):
+    s = make_settings()  # store_path=None
+    s.apply_preset("60/5")
+    s.bump_standup()
+    assert s.sit_min == 60
+    assert s.stats["total"] == 1

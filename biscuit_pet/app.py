@@ -31,9 +31,18 @@ from .core import (
 )
 
 SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
-# 显示尺寸（v3 缩小约 1/3）：精灵原图为高分辨率（2000px+），窗口缩小仅影响
+# 显示尺寸（v4 再缩小）：精灵原图为高分辨率（2000px+），窗口缩小仅影响
 # 屏幕上的占位大小，SmoothTransformation 缩放下画质不受影响
-PET_W, PET_H = 130, 192
+PET_W, PET_H = 110, 162
+
+# 各姿势视觉归一系数：按 alpha 主体高度占比实测（中位数 0.899）计算，
+# 消除不同批次生成图里狗在画面中的大小差异（如 head_tilt 偏小 30%），
+# 使每个姿势在屏幕上的主体大小一致。系数已限宽（× 占比 ≤ 1.0）防裁切。
+SPRITE_SCALE = {
+    "idle": 1.016, "lie_down": 1.0, "stare": 0.907, "roll": 0.899,
+    "sleep": 1.0, "happy": 0.969, "head_tilt": 1.293, "beg": 1.030,
+    "shake": 0.966, "play_ball": 1.047, "yawn": 0.912,
+}
 
 
 def _sprite_path(pose):
@@ -100,6 +109,16 @@ class PetWindow(QWidget):
         self.sprites = {}
         for p in POSES:
             pix = QPixmap(_sprite_path(p))
+            if not pix.isNull():
+                # 视觉归一：先按姿势系数缩放主体大小，再缩到窗口尺寸。
+                # 预处理一次并缓存，切换姿势时零延迟。
+                f = SPRITE_SCALE.get(p, 1.0)
+                if abs(f - 1.0) > 0.005:
+                    pix = pix.scaled(
+                        round(pix.width() * f), round(pix.height() * f),
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pix = pix.scaled(self.size(), Qt.KeepAspectRatio,
+                                 Qt.SmoothTransformation)
             self.sprites[p] = pix
 
         self.fsm = PetFSM(
@@ -164,9 +183,8 @@ class PetWindow(QWidget):
         pix = self.sprites.get(pose)
         if pix is None or pix.isNull():
             return
-        self.label.setPixmap(
-            pix.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        )
+        # 已在加载时归一化到窗口尺寸，直接设置即可
+        self.label.setPixmap(pix)
 
     # ---- 状态机 / 提醒 ----
     def on_tick(self):

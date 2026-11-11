@@ -61,3 +61,52 @@ def test_UIH_reminder_snooze():
     t["v"] = 60 * 35 + 1
     due, _ = sch.check()
     assert due is True
+
+
+# ---- 两段式节奏：45 分钟久坐 + 3 分钟活动 ----
+
+def test_UIH_reminder_sedentary_then_activity():
+    """久坐提醒后 3 分钟触发活动结束提醒。"""
+    sch, t = _sched(interval=45)
+    t["v"] = 60 * 45
+    due, msg = sch.check()
+    assert due is True
+    assert "活动" in msg or "动" in msg          # 久坐提醒
+    # 活动窗口内（3 分钟内）不再打扰
+    t["v"] = 60 * 45 + 60 * 3 - 1
+    due, msg = sch.check()
+    assert due is False and msg is None
+    # 3 分钟到 → 活动结束提醒
+    t["v"] = 60 * 45 + 60 * 3
+    due, msg = sch.check()
+    assert due is True and ("活动时间到" in msg or "动完" in msg)
+    # 活动提醒只触发一次
+    t["v"] = 60 * 45 + 60 * 3 + 10
+    due, _ = sch.check()
+    assert due is False
+
+
+def test_UIH_reminder_cycle_repeats_after_activity():
+    """活动结束后进入下一个 45 分钟周期。"""
+    sch, t = _sched(interval=45)
+    t["v"] = 60 * 45
+    sch.check()                                   # 久坐提醒
+    t["v"] = 60 * 48
+    sch.check()                                   # 活动结束提醒
+    t["v"] = 60 * 48 + 60 * 45 - 1
+    due, _ = sch.check()
+    assert due is False
+    t["v"] = 60 * 48 + 60 * 45 + 1
+    due, _ = sch.check()
+    assert due is True
+
+
+def test_UIH_reminder_snooze_cancels_pending_activity():
+    """推迟久坐提醒时，未触发的活动提醒一并取消。"""
+    sch, t = _sched(interval=45)
+    t["v"] = 60 * 45
+    sch.check()                                   # 久坐提醒（活动提醒待触发）
+    sch.snooze(10, now=60 * 45)
+    t["v"] = 60 * 48 + 5                          # 原活动提醒时刻已过
+    due, _ = sch.check()
+    assert due is False                           # 不应触发活动提醒

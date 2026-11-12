@@ -13,7 +13,7 @@ def test_UIH_click_returns_reaction_and_speech():
     fsm, t = _fsm()
     state, speech = fsm.on_click(now=1.0)
     assert state in CLICK_REACTIONS
-    assert "饼干" in speech
+    assert "皮皮" in speech
 
 
 def test_UIH_roll_expires_back_to_idle():
@@ -88,11 +88,11 @@ def test_UIH_new_temp_states_expire_to_idle():
 
 
 def test_UIH_new_pose_speech_has_name():
-    """新增姿势台词都含饼干名字。"""
+    """新增姿势台词都含皮皮名字。"""
     fsm, t = _fsm()
     for pose in ("head_tilt", "beg", "shake", "play_ball", "yawn"):
         text = fsm.speech(pose)
-        assert "饼干" in text, f"{pose} speech should contain name"
+        assert "皮皮" in text, f"{pose} speech should contain name"
 
 
 def test_UIH_state_duration_defined_for_all_temp():
@@ -108,7 +108,7 @@ def test_UIH_double_click_triggers_belly_rub():
     fsm, t = _fsm()
     state, speech = fsm.on_double_click(now=1.0)
     assert state == "roll"
-    assert "饼干" in speech
+    assert "皮皮" in speech
     assert fsm.roll_until > 1.0
 
 
@@ -117,7 +117,7 @@ def test_UIH_pet_triggers_head_tilt():
     fsm, t = _fsm()
     state, speech = fsm.on_pet(now=2.0)
     assert state == "head_tilt"
-    assert "饼干" in speech
+    assert "皮皮" in speech
 
 
 def test_UIH_feed_triggers_beg():
@@ -125,7 +125,7 @@ def test_UIH_feed_triggers_beg():
     fsm, t = _fsm()
     state, speech = fsm.on_feed(now=3.0)
     assert state == "beg"
-    assert "饼干" in speech
+    assert "皮皮" in speech
 
 
 def test_UIH_key_space_to_happy():
@@ -133,7 +133,7 @@ def test_UIH_key_space_to_happy():
     fsm, t = _fsm()
     state, speech = fsm.on_key("space", now=1.0)
     assert state == "happy"
-    assert "饼干" in speech
+    assert "皮皮" in speech
 
 
 def test_UIH_key_r_to_roll():
@@ -233,7 +233,7 @@ def test_UIH_time_aware_state_returns_valid():
 
 
 def test_UIH_greeting_message_contains_name():
-    """问候消息包含饼干名字。"""
+    """问候消息包含皮皮名字。"""
     for hour in range(24):
         msg = greeting_message(hour)
-        assert "饼干" in msg
+        assert "皮皮" in msg

@@ -1,4 +1,4 @@
-"""饼干桌面宠物 · 核心逻辑层（无 Qt 依赖，便于单测）。
+"""皮皮桌面宠物（猫）· 核心逻辑层（无 Qt 依赖，便于单测）。
 
 v2 新增互动：
 - 双击 → 挠肚皮（special roll）
@@ -16,12 +16,13 @@ import json
 import os
 import time as _time
 
-PET_NAME = "饼干"
+PET_NAME = "皮皮"
 
 # 全部姿势（11 种）
 POSES = [
     "idle", "lie_down", "stare", "roll", "sleep", "happy",
     "head_tilt", "beg", "shake", "play_ball", "yawn",
+    "eating", "grooming",
 ]
 
 # 状态 -> 姿势文件名
@@ -37,10 +38,12 @@ STATE_TO_POSE = {
     "shake": "shake",
     "play_ball": "play_ball",
     "yawn": "yawn",
+    "eating": "eating",
+    "grooming": "grooming",
 }
 
 # 点击后随机触发的反应状态（v2 扩充：加入 yawn, play_ball）
-CLICK_REACTIONS = ["happy", "roll", "stare", "head_tilt", "beg", "shake", "yawn", "play_ball"]
+CLICK_REACTIONS = ["happy", "roll", "stare", "head_tilt", "beg", "shake", "yawn", "play_ball", "grooming"]
 
 # 各临时状态的持续秒数
 STATE_DURATION = {
@@ -51,6 +54,8 @@ STATE_DURATION = {
     "shake": 2.5,
     "play_ball": 3.5,
     "yawn": 2.0,
+    "eating": 4.0,
+    "grooming": 3.0,
 }
 
 # 双击 → 挠肚皮专用台词
@@ -62,23 +67,23 @@ BELLY_RUB_SPEECHES = [
 
 # 抚摸（长按）专用台词
 PET_SPEECHES = [
-    "{name}：哼哼～主人摸摸我～",
-    "{name}：好舒服～再摸摸～",
-    "{name}：主人的手好温暖～",
+    "{name}：呼噜呼噜～主人摸摸我～",
+    "{name}：好舒服～再摸摸下巴～",
+    "{name}：主人的手好温暖～喵～",
 ]
 
 # 喂食台词
 FEED_SPEECHES = [
-    "{name}：嗷呜～好吃！谢谢主人！",
-    "{name}：吧唧吧唧～还有吗？",
-    "{name}：吃饱啦～开心！",
+    "{name}：吧唧吧唧～小鱼干真好吃！",
+    "{name}：喵呜～还有吗？再添一碗嘛～",
+    "{name}：吃饱啦～舔舔爪子休息一下～",
 ]
 
 # 连击里程碑台词
 COMBO_SPEECHES = {
     5: "哇！主人好热情～",
-    10: "十连击！饼干好开心！",
-    20: "二十连击！主人最爱饼干！",
+    10: "十连击！皮皮好开心！",
+    20: "二十连击！主人最爱皮皮！",
 }
 
 # 开机问候（按时间段）
@@ -96,11 +101,11 @@ def greeting_message(hour):
 
 
 class PetConfig:
-    """饼干的基本设定。"""
+    """皮皮的基本设定。"""
 
     def __init__(self):
         self.name = PET_NAME
-        self.no_tail = True
+        self.no_tail = False
         self.realistic = True
         self.idle_to_sleep_sec = 120
         self.mood_decay_sec = 60       # 心情每 60 秒衰减 1 点
@@ -121,8 +126,9 @@ class PetFSM:
         "r": "roll",
         "s": "sleep",
         "f": "beg",       # feed
-        "h": "shake",     # handshake
+        "h": "grooming",  # 清洁舔毛
         "y": "yawn",
+        "e": "eating",    # 吃饭
     }
 
     def __init__(self, config=None, time_fn=None, rng=None, hour_fn=None):
@@ -268,17 +274,19 @@ class PetFSM:
     # ---- 台词 ----
     def speech(self, state):
         return {
-            "happy": f"{self.config.name}：汪！主人你来啦～",
+            "happy": f"{self.config.name}：喵呜！主人你来啦～",
             "roll": f"{self.config.name}：主人陪我玩嘛～（打滚撒娇）",
-            "stare": f"{self.config.name}：……（大眼睛专注地望着你）",
-            "idle": f"{self.config.name}：哼哼～",
-            "lie_down": f"{self.config.name}：趴着歇会儿～",
+            "stare": f"{self.config.name}：……（圆眼睛专注地盯着你）",
+            "idle": f"{self.config.name}：喵～",
+            "lie_down": f"{self.config.name}：趴着晒太阳～舒服～",
             "sleep": f"{self.config.name}：Zzz……",
             "head_tilt": f"{self.config.name}：歪头～主人在说什么呀？",
-            "beg": f"{self.config.name}：作揖作揖！有零食吗～",
-            "shake": f"{self.config.name}：握手握手～嘿嘿！",
-            "play_ball": f"{self.config.name}：球球！主人陪我玩球球好不好？",
-            "yawn": f"{self.config.name}：哈欠～好困哦……",
+            "beg": f"{self.config.name}：喵呜喵呜～有小鱼干吗？",
+            "shake": f"{self.config.name}：踱踱步～巡视一下领地～",
+            "play_ball": f"{self.config.name}：线球球！主人陪我玩好不好？",
+            "yawn": f"{self.config.name}：伸个懒腰～喵～好舒服……",
+            "eating": f"{self.config.name}：吧唧吧唧～吃饭饭真香～",
+            "grooming": f"{self.config.name}：舔毛毛～保持优雅～",
         }.get(state, "")
 
     # ---- 时间感知 ----

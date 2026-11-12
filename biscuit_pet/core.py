@@ -18,9 +18,9 @@ import time as _time
 
 PET_NAME = "皮皮"
 
-# 全部姿势（11 种）
+# 全部姿势（12 种）
 POSES = [
-    "idle", "lie_down", "stare", "roll", "sleep", "happy",
+    "idle", "lie_down", "roll", "sleep", "happy",
     "head_tilt", "beg", "shake", "play_ball", "yawn",
     "eating", "grooming",
 ]
@@ -28,7 +28,6 @@ POSES = [
 # 状态 -> 姿势文件名
 STATE_TO_POSE = {
     "idle": "idle",
-    "stare": "stare",
     "roll": "roll",
     "happy": "happy",
     "sleep": "sleep",
@@ -43,7 +42,7 @@ STATE_TO_POSE = {
 }
 
 # 点击后随机触发的反应状态（v2 扩充：加入 yawn, play_ball）
-CLICK_REACTIONS = ["happy", "roll", "stare", "head_tilt", "beg", "shake", "yawn", "play_ball", "grooming"]
+CLICK_REACTIONS = ["happy", "roll", "head_tilt", "beg", "shake", "yawn", "play_ball", "grooming"]
 
 # 各临时状态的持续秒数
 STATE_DURATION = {
@@ -276,7 +275,6 @@ class PetFSM:
         return {
             "happy": f"{self.config.name}：喵呜！主人你来啦～",
             "roll": f"{self.config.name}：主人陪我玩嘛～（打滚撒娇）",
-            "stare": f"{self.config.name}：……（圆眼睛专注地盯着你）",
             "idle": f"{self.config.name}：喵～",
             "lie_down": f"{self.config.name}：趴着晒太阳～舒服～",
             "sleep": f"{self.config.name}：Zzz……",
@@ -321,16 +319,13 @@ class PetFSM:
         # 睡觉中被打断
         if self.state == "sleep" and (now - self.last_interaction) < 2.0:
             self.state = "idle"
-        # idle/stare 闲置逻辑
-        if self.state in ("idle", "stare"):
-            # 心情低时更容易睡觉
+        # idle 闲置逻辑：超时睡觉（心情低时更容易睡）
+        if self.state == "idle":
             sleep_threshold = self.config.idle_to_sleep_sec
             if self.mood < 20:
                 sleep_threshold = max(30, sleep_threshold // 3)
             if (now - self.last_interaction) > sleep_threshold:
                 self.state = "sleep"
-            elif self.rng.random() < 0.02:
-                self.state = "stare" if self.state == "idle" else "idle"
         return self.state, (self.state != prev)
 
     def pose(self):

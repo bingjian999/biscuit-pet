@@ -1,8 +1,8 @@
 @echo off
 chcp 65001 >nul
 REM ============================================================
-REM  饼干桌面宠物 · 一键打包 EXE（需在 Windows 上运行）
-REM  双击本脚本即可生成 biscuit_pet.exe，点开即用。
+REM  皮皮桌面宠物 · 一键打包 EXE（需在 Windows 上运行）
+REM  双击本脚本即可生成 pipi_pet.exe，点开即用。
 REM ============================================================
 cd /d "%~dp0"
 
@@ -21,13 +21,13 @@ python -m pip install pyinstaller
 
 echo [3/4] 打包中，请稍候 ...
 python -m PyInstaller --noconfirm --onefile --windowed ^
-    --name biscuit_pet ^
+    --name pipi_pet ^
     --add-data "biscuit_pet\sprites;biscuit_pet\sprites" ^
     --icon biscuit_pet\sprites\icon.ico ^
     main.py
 
 echo [4/4] 完成！
 echo.
-echo 生成位置： %~dp0dist\biscuit_pet.exe
-echo 把 biscuit_pet.exe 拷到任意目录，双击即可运行。
+echo 生成位置： %~dp0dist\pipi_pet.exe
+echo 把 pipi_pet.exe 拷到任意目录，双击即可运行。
 pause

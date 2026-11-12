@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 REM ============================================================
-REM  饼干桌面宠物 · 一键同步到 GitHub
+REM  皮皮桌面宠物 · 一键同步到 GitHub
 REM  前提：本机已能 push 到 GitHub（已登录 git 凭证 / 装了 Git Credential Manager）
 REM ============================================================
 cd /d "%~dp0"
@@ -21,7 +21,7 @@ echo *.spec>>.gitignore
 
 git init
 git add -A
-git commit -m "饼干桌面宠物：逼真无尾桌面宠物狗"
+git commit -m "皮皮桌面宠物：写实银虎斑桌面宠物猫"
 git branch -M main
 git remote remove origin 2>nul
 git remote add origin "%REPO%"

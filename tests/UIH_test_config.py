@@ -6,12 +6,12 @@ from biscuit_pet.core import PetConfig, BreakSettings, PET_NAME, POSES, STATE_TO
 
 def test_UIH_pet_name_is_biscuit():
     cfg = PetConfig()
-    assert cfg.name == PET_NAME == "饼干"
+    assert cfg.name == PET_NAME == "皮皮"
 
 
 def test_UIH_biscuit_has_no_tail():
-    """饼干没有尾巴（设定层）。"""
-    assert PetConfig().no_tail is True
+    """皮皮有尾巴（猫的设定）。"""
+    assert PetConfig().no_tail is False
 
 
 def test_UIH_realistic_not_cartoon():
@@ -20,10 +20,11 @@ def test_UIH_realistic_not_cartoon():
 
 
 def test_UIH_all_poses_present():
-    """十一种姿势齐备。"""
+    """十三种姿势齐备（猫版新增吃饭、舔毛）。"""
     expected = {
         "idle", "lie_down", "stare", "roll", "sleep", "happy",
         "head_tilt", "beg", "shake", "play_ball", "yawn",
+        "eating", "grooming",
     }
     assert set(POSES) == expected
 

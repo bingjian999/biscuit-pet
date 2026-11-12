@@ -22,7 +22,7 @@ def test_UIH_roll_expires_back_to_idle():
             return seq[0]
 
         def random(self):
-            return 1.0  # 永不触发 idle<->stare 随机切换
+            return 1.0  # 稳定随机源（历史遗留注释：原 idle<->stare 切换已随 stare 移除）
 
     fsm, t = _fsm()
     fsm.rng = RngNoToggle()

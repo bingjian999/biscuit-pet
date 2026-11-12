@@ -20,9 +20,9 @@ def test_UIH_realistic_not_cartoon():
 
 
 def test_UIH_all_poses_present():
-    """十三种姿势齐备（猫版新增吃饭、舔毛）。"""
+    """十二种姿势齐备（猫版，无 stare 静态注视）。"""
     expected = {
-        "idle", "lie_down", "stare", "roll", "sleep", "happy",
+        "idle", "lie_down", "roll", "sleep", "happy",
         "head_tilt", "beg", "shake", "play_ball", "yawn",
         "eating", "grooming",
     }

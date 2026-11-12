@@ -37,13 +37,13 @@ from .core import (
 SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
 # 显示尺寸（v4 再缩小）：精灵原图为高分辨率（2000px+），窗口缩小仅影响
 # 屏幕上的占位大小，SmoothTransformation 缩放下画质不受影响
-PET_W, PET_H = 110, 162
+PET_W, PET_H = 220, 324
 
 # 各姿势视觉归一系数：按 alpha 主体高度占比实测（中位数 0.920）计算，
 # 消除不同姿势图里猫在画面中的大小差异（如 idle/eating 为宽构图），
 # 使每个姿势在屏幕上的主体大小一致。系数已限宽（× 占比 ≤ 1.0）防裁切。
 SPRITE_SCALE = {
-    "idle": 1.500, "lie_down": 1.000, "stare": 1.000, "roll": 1.000,
+    "idle": 1.500, "lie_down": 1.000, "roll": 1.000,
     "sleep": 1.275, "happy": 1.108, "head_tilt": 1.254, "beg": 1.021,
     "shake": 1.000, "play_ball": 1.000, "yawn": 1.000,
     "eating": 1.500, "grooming": 1.000,
@@ -798,7 +798,7 @@ class PetWindow(QWidget):
         m.addAction("打滚撒娇").triggered.connect(self._do_roll)
         m.addAction("歪歪头").triggered.connect(self._do_head_tilt)
         m.addAction("讨饭饭").triggered.connect(self._do_beg)
-        m.addAction("舔毛毛").triggered.connect(self._do_shake)
+        m.addAction("踱步").triggered.connect(self._do_shake)
         m.addAction("玩球球").triggered.connect(self._do_play_ball)
         m.addAction("伸懒腰").triggered.connect(self._do_yawn)
         m.addSeparator()
@@ -838,7 +838,7 @@ class PetWindow(QWidget):
             "R — 打滚撒娇\n"
             "S — 去睡觉\n"
             "F — 作揖讨食\n"
-            "H — 握手\n"
+            "H — 舔毛毛\n"
             "Y — 打哈欠\n"
             "\n双击 — 挠肚皮\n长按 — 摸摸头"
         )

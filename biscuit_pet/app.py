@@ -1,4 +1,4 @@
-"""饼干桌面宠物 · Qt 界面层 v2。
+"""皮皮桌面宠物 · Qt 界面层 v2。
 
 新增互动：双击挠肚皮、长按抚摸、键盘快捷键、喂食、开机问候、心情显示。
 """
@@ -39,13 +39,14 @@ SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
 # 屏幕上的占位大小，SmoothTransformation 缩放下画质不受影响
 PET_W, PET_H = 110, 162
 
-# 各姿势视觉归一系数：按 alpha 主体高度占比实测（中位数 0.899）计算，
-# 消除不同批次生成图里狗在画面中的大小差异（如 head_tilt 偏小 30%），
+# 各姿势视觉归一系数：按 alpha 主体高度占比实测（中位数 0.920）计算，
+# 消除不同姿势图里猫在画面中的大小差异（如 idle/eating 为宽构图），
 # 使每个姿势在屏幕上的主体大小一致。系数已限宽（× 占比 ≤ 1.0）防裁切。
 SPRITE_SCALE = {
-    "idle": 1.016, "lie_down": 1.0, "stare": 0.907, "roll": 0.899,
-    "sleep": 1.0, "happy": 0.969, "head_tilt": 1.293, "beg": 1.030,
-    "shake": 0.966, "play_ball": 1.047, "yawn": 0.912,
+    "idle": 1.500, "lie_down": 1.000, "stare": 1.000, "roll": 1.000,
+    "sleep": 1.275, "happy": 1.108, "head_tilt": 1.254, "beg": 1.021,
+    "shake": 1.000, "play_ball": 1.000, "yawn": 1.000,
+    "eating": 1.500, "grooming": 1.000,
 }
 
 
@@ -54,7 +55,7 @@ def _sprite_path(pose):
 
 
 class SpeechBubble(QWidget):
-    """小狗头上的圆角台词气泡，自动消失。"""
+    """小猫头上的圆角台词气泡，自动消失。"""
 
     def __init__(self):
         super().__init__()
@@ -612,7 +613,7 @@ class PetWindow(QWidget):
         if self.break_settings.sound_enabled:
             QApplication.beep()
         title = "该起身活动啦！已连续久坐 {} 分钟".format(self.break_settings.sit_min)
-        msg = "站起来活动 {} 分钟，饼干陪你一起拉伸～".format(self.break_settings.activity_min)
+        msg = "站起来活动 {} 分钟，皮皮陪你一起拉伸～".format(self.break_settings.activity_min)
         dlg = self.break_dlg_full if self.break_settings.fullscreen_mode else self.break_dlg
         dlg.popup(title, msg)
         self.set_pose("happy")
@@ -652,7 +653,7 @@ class PetWindow(QWidget):
             self.break_panel.raise_()
 
     def _place_ring(self):
-        """把环形倒计时放到饼干头顶右上方。"""
+        """把环形倒计时放到皮皮头顶右上方。"""
         geo = self.frameGeometry()
         self.ring.move(geo.x() + geo.width() + 2, geo.y() - 4)
 
@@ -796,10 +797,10 @@ class PetWindow(QWidget):
         # 姿势组
         m.addAction("打滚撒娇").triggered.connect(self._do_roll)
         m.addAction("歪歪头").triggered.connect(self._do_head_tilt)
-        m.addAction("作揖讨食").triggered.connect(self._do_beg)
-        m.addAction("握手").triggered.connect(self._do_shake)
+        m.addAction("讨饭饭").triggered.connect(self._do_beg)
+        m.addAction("舔毛毛").triggered.connect(self._do_shake)
         m.addAction("玩球球").triggered.connect(self._do_play_ball)
-        m.addAction("打哈欠").triggered.connect(self._do_yawn)
+        m.addAction("伸懒腰").triggered.connect(self._do_yawn)
         m.addSeparator()
 
         # 功能组
@@ -832,7 +833,7 @@ class PetWindow(QWidget):
     def _show_help(self):
         """显示快捷键帮助。"""
         help_text = (
-            "饼干快捷键：\n"
+            "皮皮快捷键：\n"
             "空格 — 开心汪汪\n"
             "R — 打滚撒娇\n"
             "S — 去睡觉\n"
@@ -989,7 +990,7 @@ class PetWindow(QWidget):
     def _do_sleep(self):
         self.fsm.state = "sleep"
         self.set_pose("sleep")
-        self.show_bubble("嘘……饼干睡着啦～")
+        self.show_bubble("嘘……皮皮睡着啦～")
 
     def _do_quit(self):
         self.tray.hide()

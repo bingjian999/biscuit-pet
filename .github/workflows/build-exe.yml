@@ -39,7 +39,7 @@ jobs:
       - name: PyInstaller 打包
         run: |
           python -m PyInstaller --noconfirm --onefile --windowed `
-            --name pipi_pet `
+            --name biscuit_pet `
             --add-data "biscuit_pet\sprites;biscuit_pet\sprites" `
             --icon biscuit_pet\sprites\icon.ico `
             main.py
@@ -47,6 +47,6 @@ jobs:
       - name: 上传 EXE 产物
         uses: actions/upload-artifact@v4
         with:
-          name: pipi_pet-exe
-          path: dist\pipi_pet.exe
+          name: biscuit_pet-exe
+          path: dist\biscuit_pet.exe
           if-no-files-found: error

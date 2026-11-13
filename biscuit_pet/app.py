@@ -1,4 +1,4 @@
-"""皮皮桌面宠物 · Qt 界面层 v2。
+"""饼干桌面宠物 · Qt 界面层 v2。
 
 新增互动：双击挠肚皮、长按抚摸、键盘快捷键、喂食、开机问候、心情显示。
 """
@@ -7,6 +7,8 @@ import os
 import sys
 import time
 import datetime
+import functools
+import traceback
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QRectF
 from PySide6.QtGui import QPixmap, QFont, QCursor, QIcon, QColor, QPainter, QPen, QShortcut, QKeySequence
@@ -37,16 +39,15 @@ from .core import (
 SPRITE_DIR = os.path.join(os.path.dirname(__file__), "sprites")
 # 显示尺寸（v4 再缩小）：精灵原图为高分辨率（2000px+），窗口缩小仅影响
 # 屏幕上的占位大小，SmoothTransformation 缩放下画质不受影响
-PET_W, PET_H = 220, 324
+PET_W, PET_H = 110, 162
 
-# 各姿势视觉归一系数：按 alpha 主体高度占比实测（中位数 0.920）计算，
-# 消除不同姿势图里猫在画面中的大小差异（如 idle/eating 为宽构图），
+# 各姿势视觉归一系数：按 alpha 主体高度占比实测（中位数 0.899）计算，
+# 消除不同批次生成图里狗在画面中的大小差异（如 head_tilt 偏小 30%），
 # 使每个姿势在屏幕上的主体大小一致。系数已限宽（× 占比 ≤ 1.0）防裁切。
 SPRITE_SCALE = {
-    "idle": 1.500, "lie_down": 1.000, "roll": 1.000,
-    "sleep": 1.275, "happy": 1.108, "head_tilt": 1.254, "beg": 1.021,
-    "shake": 1.000, "play_ball": 1.000, "yawn": 1.000,
-    "eating": 1.500, "grooming": 1.000,
+    "idle": 1.016, "lie_down": 1.0, "stare": 0.907, "roll": 0.899,
+    "sleep": 1.0, "happy": 0.969, "head_tilt": 1.293, "beg": 1.030,
+    "shake": 0.966, "play_ball": 1.047, "yawn": 0.912,
 }
 
 
@@ -55,7 +56,7 @@ def _sprite_path(pose):
 
 
 class SpeechBubble(QWidget):
-    """小猫头上的圆角台词气泡，自动消失。"""
+    """小狗头上的圆角台词气泡，自动消失。"""
 
     def __init__(self):
         super().__init__()
@@ -613,7 +614,7 @@ class PetWindow(QWidget):
         if self.break_settings.sound_enabled:
             QApplication.beep()
         title = "该起身活动啦！已连续久坐 {} 分钟".format(self.break_settings.sit_min)
-        msg = "站起来活动 {} 分钟，皮皮陪你一起拉伸～".format(self.break_settings.activity_min)
+        msg = "站起来活动 {} 分钟，饼干陪你一起拉伸～".format(self.break_settings.activity_min)
         dlg = self.break_dlg_full if self.break_settings.fullscreen_mode else self.break_dlg
         dlg.popup(title, msg)
         self.set_pose("happy")
@@ -653,7 +654,7 @@ class PetWindow(QWidget):
             self.break_panel.raise_()
 
     def _place_ring(self):
-        """把环形倒计时放到皮皮头顶右上方。"""
+        """把环形倒计时放到饼干头顶右上方。"""
         geo = self.frameGeometry()
         self.ring.move(geo.x() + geo.width() + 2, geo.y() - 4)
 
@@ -797,10 +798,10 @@ class PetWindow(QWidget):
         # 姿势组
         m.addAction("打滚撒娇").triggered.connect(self._do_roll)
         m.addAction("歪歪头").triggered.connect(self._do_head_tilt)
-        m.addAction("讨饭饭").triggered.connect(self._do_beg)
-        m.addAction("踱步").triggered.connect(self._do_shake)
+        m.addAction("作揖讨食").triggered.connect(self._do_beg)
+        m.addAction("握手").triggered.connect(self._do_shake)
         m.addAction("玩球球").triggered.connect(self._do_play_ball)
-        m.addAction("伸懒腰").triggered.connect(self._do_yawn)
+        m.addAction("打哈欠").triggered.connect(self._do_yawn)
         m.addSeparator()
 
         # 功能组
@@ -833,12 +834,12 @@ class PetWindow(QWidget):
     def _show_help(self):
         """显示快捷键帮助。"""
         help_text = (
-            "皮皮快捷键：\n"
+            "饼干快捷键：\n"
             "空格 — 开心汪汪\n"
             "R — 打滚撒娇\n"
             "S — 去睡觉\n"
             "F — 作揖讨食\n"
-            "H — 舔毛毛\n"
+            "H — 握手\n"
             "Y — 打哈欠\n"
             "\n双击 — 挠肚皮\n长按 — 摸摸头"
         )
@@ -990,7 +991,7 @@ class PetWindow(QWidget):
     def _do_sleep(self):
         self.fsm.state = "sleep"
         self.set_pose("sleep")
-        self.show_bubble("嘘……皮皮睡着啦～")
+        self.show_bubble("嘘……饼干睡着啦～")
 
     def _do_quit(self):
         self.tray.hide()
@@ -1005,7 +1006,59 @@ class PetWindow(QWidget):
         self._place_ring()
 
 
+# ---- 崩溃防护与诊断 ----
+CRASH_LOG = os.path.join(os.path.expanduser("~"), ".biscuit_pet_crash.log")
+
+
+def _log_exception(exc_type, exc, tb):
+    """未捕获异常写入本地日志（窗口化 EXE 没有控制台，崩溃原因全靠它）。"""
+    try:
+        with open(CRASH_LOG, "a", encoding="utf-8") as f:
+            f.write("\n=== {} ===\n".format(datetime.datetime.now().isoformat()))
+            traceback.print_exception(exc_type, exc, tb, file=f)
+    except Exception:
+        pass
+
+
+def _safe_slot(fn):
+    """槽函数保护：Qt 事件循环里的异常只记日志、不再让进程静默退出。"""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            _log_exception(type(exc), exc, exc.__traceback__)
+    return wrapper
+
+
+# 所有由 Qt 定时器 / 事件驱动的入口统一套保护（历史「闪退」的主因就是
+# 这些函数里偶发异常在窗口化 EXE 下直接终止进程）
+for _cls, _methods in [
+    (PetWindow, ["on_tick", "on_break_tick", "on_romp", "on_reminder_check",
+                 "_update_mood_tooltip", "_on_hold", "_greeting",
+                 "_toggle_break_panel", "_on_break_settings_changed",
+                 "_on_rise", "_on_break_snooze", "_show_break_dialog",
+                 "show_bubble", "_notify_reminder", "_do_quit"]),
+    (BreakDialog, ["popup", "_tick_countdown", "_auto_snooze",
+                   "_on_rise", "_on_snooze"]),
+    (CountdownRing, ["paintEvent", "mousePressEvent"]),
+    (SpeechBubble, ["show_message"]),
+    (BreakSettingsPanel, ["_on_preset", "_on_custom", "_on_away",
+                          "_on_sound", "_on_fullscreen"]),
+]:
+    for _m in _methods:
+        setattr(_cls, _m, _safe_slot(getattr(_cls, _m)))
+
+
 def main():
+    # 1) 未捕获异常 → 写崩溃日志而不是静默退出
+    sys.excepthook = lambda t, v, tb: _log_exception(t, v, tb)
+    # 2) C 层崩溃（段错误等）也能留下痕迹
+    try:
+        import faulthandler
+        faulthandler.enable(open(CRASH_LOG, "a", encoding="utf-8"))
+    except Exception:
+        pass
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     pet = PetWindow()
